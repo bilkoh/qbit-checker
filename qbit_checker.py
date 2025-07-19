@@ -26,6 +26,76 @@ class QBitClient:
             if torrent.state in finished_states
         ]
 
+    def get_eligible_torrents(self, exclude_tags: list[str] = None, exclude_trackers: list[str] = None):
+        """
+        Retrieves finished torrents and filters them based on provided criteria.
+        """
+        # Start with finished torrents
+        candidates = self.get_finished_torrents()
+
+        # Filter by excluded tags
+        if exclude_tags:
+            excluded_tags_set = set(exclude_tags)
+            candidates = [
+                t for t in candidates 
+                if not set(tag.strip() for tag in t.tags.split(',')).intersection(excluded_tags_set)
+            ]
+
+        # Filter by excluded trackers
+        if exclude_trackers:
+            excluded_trackers_set = set(exclude_trackers)
+            filtered_candidates = []
+            for torrent in candidates:
+                # A torrent can have multiple trackers. If any of them are in the exclusion list, we skip the torrent.
+                torrent_tracker_urls = {tracker['url'] for tracker in torrent.trackers}
+                if not torrent_tracker_urls.intersection(excluded_trackers_set):
+                    filtered_candidates.append(torrent)
+            candidates = filtered_candidates
+            
+        return candidates
+
+    def select_torrents_for_cleanup(self, torrents: list, space_to_free_bytes: int) -> list:
+        """
+        Selects the smallest torrents from a list to free up a target amount of space.
+
+        :param torrents: A list of torrent objects (must have a 'size' attribute).
+        :param space_to_free_bytes: The target amount of space to free in bytes.
+        :return: A list of the smallest torrents that meet the space requirement, or an empty list if not possible.
+        """
+        # First, check if it's even possible to free the required space.
+        total_available_space = sum(t.size for t in torrents)
+        if total_available_space < space_to_free_bytes:
+            return []
+
+        # Sort torrents by size, smallest first
+        sorted_torrents = sorted(torrents, key=lambda t: t.size)
+        
+        selected_for_deletion = []
+        space_freed = 0
+        
+        for torrent in sorted_torrents:
+            if space_freed >= space_to_free_bytes:
+                break
+            selected_for_deletion.append(torrent)
+            space_freed += torrent.size
+            
+        return selected_for_deletion
+
+    def remove_torrents(self, torrents: list):
+        """
+        Removes a list of torrents from the qBittorrent client but keeps the data on disk.
+        
+        :param torrents: A list of torrent objects to remove.
+        """
+        if not torrents:
+            return # Do nothing if the list is empty
+
+        torrent_hashes = [t.hash for t in torrents]
+        self._client.torrents_delete(
+            torrent_hashes=torrent_hashes,
+            delete_files=False
+        )
+
 class Config:
     """
     Manages loading configuration from a JSON file and expanding environment variables.

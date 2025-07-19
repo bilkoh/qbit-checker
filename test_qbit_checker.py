@@ -108,3 +108,180 @@ def test_get_finished_torrents(config_file: Path, mocker):
     assert len(finished_torrents) == 3
     finished_hashes = {t.hash for t in finished_torrents}
     assert finished_hashes == {'1', '2', '3'}
+
+def test_get_eligible_torrents_excludes_by_tag(config_file: Path, mocker):
+    """
+    Tests that eligible torrents can be filtered to exclude certain tags.
+    """
+    # 1. Setup
+    mock_qbit_client = mocker.MagicMock()
+    
+    # Mock torrents that are all "finished", but have different tags
+    mock_torrents = [
+        mocker.MagicMock(hash='1', state='uploading', tags=''),
+        mocker.MagicMock(hash='2', state='stalledUP', tags='keep, other'),
+        mocker.MagicMock(hash='3', state='pausedUP',  tags='permaseed'), # This one should be excluded
+        mocker.MagicMock(hash='4', state='uploading', tags='another'),
+    ]
+    mock_qbit_client.torrents_info.return_value = mock_torrents
+    mocker.patch('qbit_checker.qbittorrentapi.Client', return_value=mock_qbit_client)
+
+    # 2. Execution
+    from qbit_checker import QBitClient, Config
+    config = Config(config_file)
+    qbit_client = QBitClient(config)
+    eligible_torrents = qbit_client.get_eligible_torrents(exclude_tags=['permaseed', 'some_other_tag'])
+
+    # 3. Assertion
+    assert len(eligible_torrents) == 3
+    eligible_hashes = {t.hash for t in eligible_torrents}
+    assert '3' not in eligible_hashes
+    assert eligible_hashes == {'1', '2', '4'}
+
+def test_get_eligible_torrents_excludes_by_tracker(config_file: Path, mocker):
+    """
+    Tests that eligible torrents can be filtered to exclude certain trackers.
+    """
+    # 1. Setup
+    mock_qbit_client = mocker.MagicMock()
+    
+    # Mock torrents that are finished and untagged, but have different trackers
+    # The structure of torrent.trackers is a list of objects, each with a 'url'
+    mock_torrents = [
+        mocker.MagicMock(hash='1', state='uploading', tags='', trackers=[{'url': 'udp://public.tracker.com'}]),
+        mocker.MagicMock(hash='2', state='stalledUP', tags='', trackers=[{'url': 'udp://private.tracker.io'}]), # Exclude
+        mocker.MagicMock(hash='3', state='pausedUP',  tags='', trackers=[{'url': 'udp://another.public.tracker'}]),
+        mocker.MagicMock(hash='4', state='uploading', tags='', trackers=[{'url': 'udp://private.tracker.io'}]), # Exclude
+    ]
+    mock_qbit_client.torrents_info.return_value = mock_torrents
+    mocker.patch('qbit_checker.qbittorrentapi.Client', return_value=mock_qbit_client)
+
+    # 2. Execution
+    from qbit_checker import QBitClient, Config
+    config = Config(config_file)
+    qbit_client = QBitClient(config)
+    eligible_torrents = qbit_client.get_eligible_torrents(exclude_trackers=['udp://private.tracker.io'])
+
+    # 3. Assertion
+    assert len(eligible_torrents) == 2
+    eligible_hashes = {t.hash for t in eligible_torrents}
+    assert '2' not in eligible_hashes
+    assert '4' not in eligible_hashes
+    assert eligible_hashes == {'1', '3'}
+
+def test_select_torrents_for_cleanup(config_file: Path, mocker):
+    """
+    Tests that the torrent selection algorithm correctly picks the smallest
+    torrents to free up a specific amount of space.
+    """
+    # 1. Setup
+    # This test doesn't need a real client, just the selection logic.
+    # We create mock torrents with only the 'size' and 'hash' attributes being relevant.
+    gB = 1024 * 1024 * 1024
+    mock_torrents = [
+        mocker.MagicMock(hash='1', size=2*gB),
+        mocker.MagicMock(hash='2', size=4*gB),
+        mocker.MagicMock(hash='3', size=1*gB), # Smallest
+        mocker.MagicMock(hash='4', size=8*gB), # Largest
+        mocker.MagicMock(hash='5', size=3*gB),
+    ]
+    
+    # We need an instance of QBitClient to call the method from.
+    from qbit_checker import QBitClient, Config
+    config = Config(config_file)
+    qbit_client = QBitClient(config)
+
+    # 2. Execution
+    # We want to free 5 GB. The algorithm should pick the 1GB, 2GB, and 3GB torrents.
+    space_to_free = 5.5 * gB
+    selected_torrents = qbit_client.select_torrents_for_cleanup(
+        torrents=mock_torrents, 
+        space_to_free_bytes=space_to_free
+    )
+
+    # 3. Assertion
+    assert len(selected_torrents) == 3
+    
+    selected_hashes = {t.hash for t in selected_torrents}
+    assert selected_hashes == {'1', '3', '5'} # 2GB, 1GB, 3GB torrents
+
+    total_size_freed = sum(t.size for t in selected_torrents)
+    assert total_size_freed >= space_to_free
+    assert total_size_freed == (1 + 2 + 3) * gB
+
+def test_select_torrents_for_cleanup_not_enough_space(config_file: Path, mocker):
+    """
+    Tests that the selection algorithm returns all torrents if the space
+    to free is larger than the total size of all available torrents.
+    """
+    # 1. Setup
+    gB = 1024 * 1024 * 1024
+    mock_torrents = [
+        mocker.MagicMock(hash='1', size=2*gB),
+        mocker.MagicMock(hash='2', size=1*gB),
+    ]
+    
+    from qbit_checker import QBitClient, Config
+    config = Config(config_file)
+    qbit_client = QBitClient(config)
+
+    # 2. Execution
+    # Ask to free 10GB, but only 3GB is available.
+    space_to_free = 10 * gB
+    selected_torrents = qbit_client.select_torrents_for_cleanup(
+        torrents=mock_torrents, 
+        space_to_free_bytes=space_to_free
+    )
+
+    # 3. Assertion
+    # It should return an empty list.
+    assert len(selected_torrents) == 0
+
+def test_remove_torrents_happy_path(config_file: Path, mocker):
+    """
+    Tests that the client correctly calls the API to remove torrents
+    without deleting their data.
+    """
+    # 1. Setup
+    # We need a mock of the underlying qbittorrentapi.Client instance
+    mock_api_client = mocker.MagicMock()
+    mocker.patch('qbit_checker.qbittorrentapi.Client', return_value=mock_api_client)
+
+    # A list of mock torrents to be deleted
+    torrents_to_delete = [
+        mocker.MagicMock(hash='111'),
+        mocker.MagicMock(hash='222'),
+    ]
+
+    from qbit_checker import QBitClient, Config
+    config = Config(config_file)
+    qbit_client = QBitClient(config)
+
+    # 2. Execution
+    qbit_client.remove_torrents(torrents_to_delete)
+
+    # 3. Assertion
+    # Verify the API was called with the correct parameters
+    mock_api_client.torrents_delete.assert_called_once_with(
+        torrent_hashes=['111', '222'],
+        delete_files=False
+    )
+
+def test_remove_torrents_empty_list(config_file: Path, mocker):
+    """
+    Tests that the client does NOT call the API if the torrent list is empty.
+    """
+    # 1. Setup
+    mock_api_client = mocker.MagicMock()
+    mocker.patch('qbit_checker.qbittorrentapi.Client', return_value=mock_api_client)
+
+    from qbit_checker import QBitClient, Config
+    config = Config(config_file)
+    qbit_client = QBitClient(config)
+
+    # 2. Execution
+    qbit_client.remove_torrents([]) # Pass an empty list
+
+    # 3. Assertion
+    # Verify the API was NOT called
+    mock_api_client.torrents_delete.assert_not_called()
