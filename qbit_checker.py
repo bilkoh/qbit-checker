@@ -2,17 +2,26 @@ import os
 import json
 import qbittorrentapi
 from typing import Any, Optional
+from dotenv import load_dotenv
+
 
 class QBitClient:
     """A client for interacting with the qBittorrent API."""
-    _FINISHED_STATES = {'uploading', 'stalledUP', 'pausedUP', 'checkingUP', 'forcedUP'}
 
-    def __init__(self, config: 'Config'):
+    _FINISHED_STATES = {
+        # "uploading",  # has leechers
+        "stalledUP",
+        "pausedUP",
+        "checkingUP",
+        "forcedUP",
+    }
+
+    def __init__(self, config: "Config"):
         self._client = qbittorrentapi.Client(
-            host=config.get('qbittorrent.host'),
-            port=config.get('qbittorrent.port'),
-            username=config.get('qbittorrent.user'),
-            password=config.get('qbittorrent.pass')
+            host=config.get("qbittorrent.host"),
+            port=config.get("qbittorrent.port"),
+            username=config.get("qbittorrent.user"),
+            password=config.get("qbittorrent.pass"),
         )
 
     def get_finished_torrents(self):
@@ -22,11 +31,14 @@ class QBitClient:
         """
         all_torrents = self._client.torrents_info()
         return [
-            torrent for torrent in all_torrents 
+            torrent
+            for torrent in all_torrents
             if torrent.state in self._FINISHED_STATES
         ]
 
-    def get_eligible_torrents(self, exclude_tags: list[str] = None, exclude_trackers: list[str] = None):
+    def get_eligible_torrents(
+        self, exclude_tags: list[str] = None, exclude_trackers: list[str] = None
+    ):
         """
         Retrieves finished torrents and filters them based on provided criteria.
         """
@@ -37,18 +49,24 @@ class QBitClient:
         if exclude_tags:
             excluded_tags_set = set(exclude_tags)
             candidates = [
-                t for t in candidates 
-                if not set(tag.strip() for tag in t.tags.split(',')).intersection(excluded_tags_set)
+                t
+                for t in candidates
+                if not set(tag.strip() for tag in t.tags.split(",")).intersection(
+                    excluded_tags_set
+                )
             ]
 
         # Filter by excluded trackers
         if exclude_trackers:
             excluded_trackers_set = set(exclude_trackers)
             candidates = [
-                t for t in candidates
-                if not {tracker['url'] for tracker in t.trackers}.intersection(excluded_trackers_set)
+                t
+                for t in candidates
+                if not {tracker["url"] for tracker in t.trackers}.intersection(
+                    excluded_trackers_set
+                )
             ]
-            
+
         return candidates
 
     @staticmethod
@@ -67,16 +85,16 @@ class QBitClient:
 
         # Sort torrents by size, smallest first
         sorted_torrents = sorted(torrents, key=lambda t: t.size)
-        
+
         selected_for_deletion = []
         space_freed = 0
-        
+
         for torrent in sorted_torrents:
             if space_freed >= space_to_free_bytes:
                 break
             selected_for_deletion.append(torrent)
             space_freed += torrent.size
-            
+
         return selected_for_deletion
 
     def remove_torrents(self, torrents: list, delete_files: bool = True):
@@ -87,30 +105,32 @@ class QBitClient:
         :param delete_files: If True, deletes the torrent's data from disk. Defaults to True.
         """
         if not torrents:
-            return # Do nothing if the list is empty
+            return  # Do nothing if the list is empty
 
         torrent_hashes = [t.hash for t in torrents]
         self._client.torrents_delete(
-            torrent_hashes=torrent_hashes,
-            delete_files=delete_files
+            torrent_hashes=torrent_hashes, delete_files=delete_files
         )
+
 
 class Config:
     """
     Manages loading configuration from a JSON file and expanding environment variables.
     """
+
     def __init__(self, config_path: str):
+        load_dotenv()  # Load variables from .env file into the environment
         self._config = self._load_config(config_path)
 
     def _load_config(self, config_path: str) -> dict:
         """Loads the config file and expands any environment variables."""
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, "r") as f:
                 config_data = json.load(f)
         except (FileNotFoundError, TypeError):
             # If the path is None/invalid or not found, treat it as an empty config
             return {}
-        
+
         self._expand_variables(config_data)
         return config_data
 
@@ -118,13 +138,13 @@ class Config:
         """Recursively traverses the config data to find and replace env var placeholders."""
         if isinstance(data, dict):
             for key, value in data.items():
-                if isinstance(value, str) and value.startswith('$'):
+                if isinstance(value, str) and value.startswith("$"):
                     data[key] = os.getenv(value[1:])
                 else:
                     self._expand_variables(value)
         elif isinstance(data, list):
             for index, item in enumerate(data):
-                if isinstance(item, str) and item.startswith('$'):
+                if isinstance(item, str) and item.startswith("$"):
                     data[index] = os.getenv(item[1:])
                 else:
                     self._expand_variables(item)
@@ -134,7 +154,7 @@ class Config:
         Retrieves a value from the configuration using dot notation.
         e.g., get('qbittorrent.host')
         """
-        keys = key_path.split('.')
+        keys = key_path.split(".")
         value = self._config
         try:
             for key in keys:

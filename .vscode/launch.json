@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Pytest - Integration Test",
+      "type": "python",
+      "request": "launch",
+      "program": "C:/Python310/Scripts/pytest.exe",
+      "args": [
+        "test_integration.py::test_fetch_and_validate_torrent_data_structure",
+        "--no-header",
+        "--no-summary"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ]
+}
