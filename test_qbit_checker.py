@@ -237,22 +237,15 @@ def test_select_torrents_for_cleanup_not_enough_space(config_file: Path, mocker)
     # It should return an empty list.
     assert len(selected_torrents) == 0
 
-def test_remove_torrents_happy_path(config_file: Path, mocker):
+def test_remove_torrents_deletes_files_by_default(config_file: Path, mocker):
     """
-    Tests that the client correctly calls the API to remove torrents
-    without deleting their data.
+    Tests that remove_torrents defaults to deleting files.
     """
     # 1. Setup
-    # We need a mock of the underlying qbittorrentapi.Client instance
     mock_api_client = mocker.MagicMock()
     mocker.patch('qbit_checker.qbittorrentapi.Client', return_value=mock_api_client)
-
-    # A list of mock torrents to be deleted
-    torrents_to_delete = [
-        mocker.MagicMock(hash='111'),
-        mocker.MagicMock(hash='222'),
-    ]
-
+    torrents_to_delete = [mocker.MagicMock(hash='111')]
+    
     from qbit_checker import QBitClient, Config
     config = Config(config_file)
     qbit_client = QBitClient(config)
@@ -261,10 +254,31 @@ def test_remove_torrents_happy_path(config_file: Path, mocker):
     qbit_client.remove_torrents(torrents_to_delete)
 
     # 3. Assertion
-    # Verify the API was called with the correct parameters
     mock_api_client.torrents_delete.assert_called_once_with(
-        torrent_hashes=['111', '222'],
-        delete_files=False
+        torrent_hashes=['111'],
+        delete_files=True  # Check for the new default
+    )
+
+def test_remove_torrents_can_preserve_files(config_file: Path, mocker):
+    """
+    Tests that remove_torrents can be told to preserve files.
+    """
+    # 1. Setup
+    mock_api_client = mocker.MagicMock()
+    mocker.patch('qbit_checker.qbittorrentapi.Client', return_value=mock_api_client)
+    torrents_to_delete = [mocker.MagicMock(hash='222')]
+
+    from qbit_checker import QBitClient, Config
+    config = Config(config_file)
+    qbit_client = QBitClient(config)
+
+    # 2. Execution
+    qbit_client.remove_torrents(torrents_to_delete, delete_files=False)
+
+    # 3. Assertion
+    mock_api_client.torrents_delete.assert_called_once_with(
+        torrent_hashes=['222'],
+        delete_files=False # Check for the override
     )
 
 def test_remove_torrents_empty_list(config_file: Path, mocker):
