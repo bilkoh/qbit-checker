@@ -5,6 +5,8 @@ from typing import Any, Optional
 
 class QBitClient:
     """A client for interacting with the qBittorrent API."""
+    _FINISHED_STATES = {'uploading', 'stalledUP', 'pausedUP', 'checkingUP', 'forcedUP'}
+
     def __init__(self, config: 'Config'):
         self._client = qbittorrentapi.Client(
             host=config.get('qbittorrent.host'),
@@ -19,11 +21,9 @@ class QBitClient:
         Finished states include various forms of uploading/seeding.
         """
         all_torrents = self._client.torrents_info()
-        finished_states = {'uploading', 'stalledUP', 'pausedUP', 'checkingUP', 'forcedUP'}
-        
         return [
             torrent for torrent in all_torrents 
-            if torrent.state in finished_states
+            if torrent.state in self._FINISHED_STATES
         ]
 
     def get_eligible_torrents(self, exclude_tags: list[str] = None, exclude_trackers: list[str] = None):
@@ -44,17 +44,15 @@ class QBitClient:
         # Filter by excluded trackers
         if exclude_trackers:
             excluded_trackers_set = set(exclude_trackers)
-            filtered_candidates = []
-            for torrent in candidates:
-                # A torrent can have multiple trackers. If any of them are in the exclusion list, we skip the torrent.
-                torrent_tracker_urls = {tracker['url'] for tracker in torrent.trackers}
-                if not torrent_tracker_urls.intersection(excluded_trackers_set):
-                    filtered_candidates.append(torrent)
-            candidates = filtered_candidates
+            candidates = [
+                t for t in candidates
+                if not {tracker['url'] for tracker in t.trackers}.intersection(excluded_trackers_set)
+            ]
             
         return candidates
 
-    def select_torrents_for_cleanup(self, torrents: list, space_to_free_bytes: int) -> list:
+    @staticmethod
+    def select_torrents_for_cleanup(torrents: list, space_to_free_bytes: int) -> list:
         """
         Selects the smallest torrents from a list to free up a target amount of space.
 
@@ -106,8 +104,12 @@ class Config:
 
     def _load_config(self, config_path: str) -> dict:
         """Loads the config file and expands any environment variables."""
-        with open(config_path, 'r') as f:
-            config_data = json.load(f)
+        try:
+            with open(config_path, 'r') as f:
+                config_data = json.load(f)
+        except (FileNotFoundError, TypeError):
+            # If the path is None/invalid or not found, treat it as an empty config
+            return {}
         
         self._expand_variables(config_data)
         return config_data

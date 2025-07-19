@@ -194,7 +194,7 @@ def test_select_torrents_for_cleanup(config_file: Path, mocker):
     # 2. Execution
     # We want to free 5 GB. The algorithm should pick the 1GB, 2GB, and 3GB torrents.
     space_to_free = 5.5 * gB
-    selected_torrents = qbit_client.select_torrents_for_cleanup(
+    selected_torrents = QBitClient.select_torrents_for_cleanup(
         torrents=mock_torrents, 
         space_to_free_bytes=space_to_free
     )
@@ -228,7 +228,7 @@ def test_select_torrents_for_cleanup_not_enough_space(config_file: Path, mocker)
     # 2. Execution
     # Ask to free 10GB, but only 3GB is available.
     space_to_free = 10 * gB
-    selected_torrents = qbit_client.select_torrents_for_cleanup(
+    selected_torrents = QBitClient.select_torrents_for_cleanup(
         torrents=mock_torrents, 
         space_to_free_bytes=space_to_free
     )
