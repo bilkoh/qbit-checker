@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 # This import will fail until we create the class in qbit_checker.py
-from qbit_checker import Config
+from qbit_checker import Config, TorrentFilterBuilder
 
 
 @pytest.fixture
@@ -338,3 +338,172 @@ def test_remove_torrents_empty_list(config_file: Path, mocker):
     # 3. Assertion
     # Verify the API was NOT called
     mock_api_client.torrents_delete.assert_not_called()
+
+
+# TorrentFilterBuilder Tests
+# ==========================
+
+
+@pytest.fixture
+def mock_torrents(mocker):
+    """Provides a list of mock torrent objects for filter testing."""
+    gB = 1024 * 1024 * 1024
+    return [
+        # Torrent 1: High ratio, long seeding time
+        mocker.MagicMock(
+            hash="1",
+            name="ubuntu-22.04.iso",
+            state="stalledUP",
+            tags="linux,iso",
+            trackers=[{"url": "udp://tracker.opentrackr.org:1337/announce"}],
+            size=10 * gB,
+            completion_on=1672531200,  # 2023-01-01
+            ratio=5.0,
+            seeding_time=864000,  # 10 days
+        ),
+        # Torrent 2: Low ratio, short seeding time
+        mocker.MagicMock(
+            hash="2",
+            name="big_buck_bunny.mp4",
+            state="pausedUP",
+            tags="movie,hd",
+            trackers=[{"url": "http://tracker.publicbt.com/announce"}],
+            size=2 * gB,
+            completion_on=1675209600,  # 2023-02-01
+            ratio=1.2,
+            seeding_time=86400,  # 1 day
+        ),
+        # Torrent 3: Medium ratio, medium seeding time, private tracker
+        mocker.MagicMock(
+            hash="3",
+            name="awesome-game.zip",
+            state="stalledUP",
+            tags="game",
+            trackers=[{"url": "https://tracker.my-private-site.com/announce"}],
+            size=50 * gB,
+            completion_on=1677628800,  # 2023-03-01
+            ratio=2.5,
+            seeding_time=345600,  # 4 days
+        ),
+        # Torrent 4: No tags, very recent, still uploading
+        mocker.MagicMock(
+            hash="4",
+            name="latest-driver.exe",
+            state="uploading",
+            tags="",
+            trackers=[{"url": "udp://tracker.opentrackr.org:1337/announce"}],
+            size=1 * gB,
+            completion_on=1680307200,  # 2023-04-01
+            ratio=0.5,
+            seeding_time=3600,  # 1 hour
+        ),
+    ]
+
+
+def test_filter_by_seeding_time(mock_torrents):
+    """Tests filtering by seeding time."""
+    # Torrents seeding for more than 5 days (should be just torrent 1)
+    five_days_in_seconds = 5 * 24 * 60 * 60
+    builder = TorrentFilterBuilder(mock_torrents).seeding_time_greater_than(
+        five_days_in_seconds
+    )
+    result = builder.build()
+    assert len(result) == 1
+    assert result[0].hash == "1"
+
+    # Torrents seeding for less than 2 days (should be torrents 2 and 4)
+    two_days_in_seconds = 2 * 24 * 60 * 60
+    builder = TorrentFilterBuilder(mock_torrents).seeding_time_less_than(
+        two_days_in_seconds
+    )
+    result = builder.build()
+    assert len(result) == 2
+    assert {t.hash for t in result} == {"2", "4"}
+
+
+def test_filter_by_state(mock_torrents):
+    """Tests filtering by torrent state."""
+    builder = TorrentFilterBuilder(mock_torrents).with_states({"pausedUP"})
+    result = builder.build()
+    assert len(result) == 1
+    assert result[0].hash == "2"
+
+
+def test_filter_by_tracker(mock_torrents):
+    """Tests filtering by a substring in the tracker URL."""
+    builder = TorrentFilterBuilder(mock_torrents).with_tracker_containing("private")
+    result = builder.build()
+    assert len(result) == 1
+    assert result[0].hash == "3"
+
+
+def test_filter_by_tags(mock_torrents):
+    """Tests filtering by tags."""
+    builder = TorrentFilterBuilder(mock_torrents).with_tags(["linux", "movie"])
+    result = builder.build()
+    assert len(result) == 2
+    assert {t.hash for t in result} == {"1", "2"}
+
+
+def test_filter_by_size(mock_torrents):
+    """Tests filtering by size."""
+    gB = 1024 * 1024 * 1024
+    # Greater than 15 GB
+    builder = TorrentFilterBuilder(mock_torrents).with_size_greater_than(15 * gB)
+    result = builder.build()
+    assert len(result) == 1
+    assert result[0].hash == "3"
+
+    # Less than 5 GB
+    builder = TorrentFilterBuilder(mock_torrents).with_size_less_than(5 * gB)
+    result = builder.build()
+    assert len(result) == 2
+    assert {t.hash for t in result} == {"2", "4"}
+
+
+def test_filter_by_completion_date(mock_torrents):
+    """Tests filtering by completion date."""
+    # Completed before Feb 15, 2023
+    builder = TorrentFilterBuilder(mock_torrents).completed_before(1676419200)
+    result = builder.build()
+    assert len(result) == 2
+    assert {t.hash for t in result} == {"1", "2"}
+
+    # Completed after Feb 15, 2023
+    builder = TorrentFilterBuilder(mock_torrents).completed_after(1676419200)
+    result = builder.build()
+    assert len(result) == 2
+    assert {t.hash for t in result} == {"3", "4"}
+
+
+def test_filter_by_ratio(mock_torrents):
+    """Tests filtering by ratio."""
+    builder = TorrentFilterBuilder(mock_torrents).with_ratio_greater_than(3.0)
+    result = builder.build()
+    assert len(result) == 1
+    assert result[0].hash == "1"
+
+
+def test_filter_chaining(mock_torrents):
+    """Tests chaining multiple filters together."""
+    five_days_in_seconds = 5 * 24 * 60 * 60
+    gB = 1024 * 1024 * 1024
+
+    builder = (
+        TorrentFilterBuilder(mock_torrents)
+        .with_states({"stalledUP", "uploading"})  # Torrents 1, 3, 4
+        .with_ratio_greater_than(1.0)  # Torrents 1, 3
+        .with_size_less_than(20 * gB)  # Torrent 1
+        .seeding_time_greater_than(five_days_in_seconds)  # Torrent 1
+    )
+    result = builder.build()
+    assert len(result) == 1
+    assert result[0].hash == "1"
+
+
+def test_no_filters_returns_all_torrents(mock_torrents):
+    """Tests that calling build() with no filters returns the original list."""
+    builder = TorrentFilterBuilder(mock_torrents)
+    result = builder.build()
+    assert len(result) == len(mock_torrents)
+    assert {t.hash for t in result} == {"1", "2", "3", "4"}

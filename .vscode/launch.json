@@ -6,11 +6,7 @@
       "type": "python",
       "request": "launch",
       "program": "C:/Python310/Scripts/pytest.exe",
-      "args": [
-        "test_integration.py::test_fetch_and_validate_torrent_data_structure",
-        "--no-header",
-        "--no-summary"
-      ],
+      "args": ["-s", "test_integration.py"],
       "console": "integratedTerminal",
       "justMyCode": true,
       "env": {

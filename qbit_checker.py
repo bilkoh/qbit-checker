@@ -113,6 +113,68 @@ class QBitClient:
         )
 
 
+class TorrentFilterBuilder:
+    """Builds a set of filters to apply to a list of torrents."""
+
+    def __init__(self, torrents: list):
+        self._torrents = torrents
+        self._filters = []
+
+    def with_states(self, states: set[str]):
+        self._filters.append(lambda t: t.state in states)
+        return self
+
+    def with_tracker_containing(self, substring: str):
+        self._filters.append(
+            lambda t: any(substring in tracker["url"] for tracker in t.trackers)
+        )
+        return self
+
+    def with_tags(self, tags: list[str]):
+        tag_set = set(tags)
+        self._filters.append(lambda t: tag_set.intersection(t.tags.split(",")))
+        return self
+
+    def with_size_greater_than(self, size_bytes: int):
+        self._filters.append(lambda t: t.size > size_bytes)
+        return self
+
+    def with_size_less_than(self, size_bytes: int):
+        self._filters.append(lambda t: t.size < size_bytes)
+        return self
+
+    def completed_before(self, timestamp: int):
+        self._filters.append(lambda t: t.completion_on < timestamp)
+        return self
+
+    def completed_after(self, timestamp: int):
+        self._filters.append(lambda t: t.completion_on > timestamp)
+        return self
+
+    def with_ratio_greater_than(self, ratio: float):
+        self._filters.append(lambda t: t.ratio > ratio)
+        return self
+
+    def seeding_time_greater_than(self, seconds: int):
+        self._filters.append(lambda t: t.seeding_time > seconds)
+        return self
+
+    def seeding_time_less_than(self, seconds: int):
+        self._filters.append(lambda t: t.seeding_time < seconds)
+        return self
+
+    def build(self) -> list:
+        """Applies all configured filters and returns the matching torrents."""
+        if not self._filters:
+            return self._torrents
+
+        return [
+            torrent
+            for torrent in self._torrents
+            if all(f(torrent) for f in self._filters)
+        ]
+
+
 class Config:
     """
     Manages loading configuration from a JSON file and expanding environment variables.
