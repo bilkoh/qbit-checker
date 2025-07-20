@@ -1,7 +1,7 @@
-import os
 import json
 from pathlib import Path
 import pytest
+from qbit_checker import strategy_smallest_first
 
 # This import will fail until we create the class in qbit_checker.py
 from qbit_checker import Config, TorrentFilterBuilder
@@ -230,7 +230,9 @@ def test_select_torrents_for_cleanup(config_file: Path, mocker):
     # We want to free 5 GB. The algorithm should pick the 1GB, 2GB, and 3GB torrents.
     space_to_free = 5.5 * gB
     selected_torrents = QBitClient.select_torrents_for_cleanup(
-        torrents=mock_torrents, space_to_free_bytes=space_to_free
+        torrents=mock_torrents,
+        space_to_free_bytes=space_to_free,
+        strategy=strategy_smallest_first,
     )
 
     # 3. Assertion
@@ -265,7 +267,9 @@ def test_select_torrents_for_cleanup_not_enough_space(config_file: Path, mocker)
     # Ask to free 10GB, but only 3GB is available.
     space_to_free = 10 * gB
     selected_torrents = QBitClient.select_torrents_for_cleanup(
-        torrents=mock_torrents, space_to_free_bytes=space_to_free
+        torrents=mock_torrents,
+        space_to_free_bytes=space_to_free,
+        strategy=strategy_smallest_first,
     )
 
     # 3. Assertion
