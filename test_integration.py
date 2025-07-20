@@ -1,11 +1,8 @@
 import pytest
 from qbit_checker import QBitClient, Config, TorrentFilterBuilder
 
-# Mark all tests in this file as 'integration'
-pytestmark = pytest.mark.integration
-
 PERMASEED_TAG = "permaseed"
-TRACKER_URL = "lst.gg"
+TRACKER_URL = "upload.cx"
 
 
 @pytest.fixture(scope="module")
@@ -79,21 +76,19 @@ def test_fetch_and_validate_torrent_data_structure(live_qbit_client: QBitClient)
     # assert hasattr(torrent.trackers, "__iter__"), "torrent.trackers is not iterable"
 
 
-def test_full_filter_and_prune_scenario(live_qbit_client: QBitClient):
+def test_full_filter_and_prune_scenario_smallest_first(live_qbit_client: QBitClient):
     """
-    An integration test that simulates a full workflow:
+    An integration test that simulates a full workflow using the 'smallest first' strategy:
     1. Fetches all torrents.
     2. Filters them based on multiple criteria using TorrentFilterBuilder.
-    3. Sorts the result by size.
-    4. Prunes the list to find the smallest torrents to free a target space.
+    3. Prunes the list to find the smallest torrents to free a target space.
     """
     # --- 1. Setup: Define criteria ---
     gB = 1024 * 1024 * 1024
     three_days_in_seconds = 3 * 24 * 60 * 60
-    space_to_free_bytes = 50 * gB
+    space_to_free_bytes = 5 * gB
 
     states_to_check = {"stalledUP", "pausedUP", "checkingUP", "forcedUP"}
-    tracker_domain = "upload.cx"
 
     # --- 2. Execution: Fetch all torrents ---
     all_torrents = live_qbit_client._client.torrents_info()
@@ -106,7 +101,7 @@ def test_full_filter_and_prune_scenario(live_qbit_client: QBitClient):
         TorrentFilterBuilder(all_torrents)
         .with_states(states_to_check)
         .seeding_time_greater_than(three_days_in_seconds)
-        .with_tracker_containing(tracker_domain)
+        .with_tracker_containing(TRACKER_URL)
     )
     filtered_torrents = builder.build()
     print(f"INFO: Found {len(filtered_torrents)} torrents after filtering.")
@@ -120,11 +115,16 @@ def test_full_filter_and_prune_scenario(live_qbit_client: QBitClient):
         return
 
     # --- 4. Execution: Prune the list ---
-    # This static method sorts by size and selects the smallest torrents.
+    from qbit_checker import strategy_smallest_first
+
     torrents_to_prune = QBitClient.select_torrents_for_cleanup(
-        torrents=filtered_torrents, space_to_free_bytes=space_to_free_bytes
+        torrents=filtered_torrents,
+        space_to_free_bytes=space_to_free_bytes,
+        strategy=strategy_smallest_first,
     )
-    print(f"INFO: Selected {len(torrents_to_prune)} torrents to prune.")
+    print(
+        f"INFO: Selected {len(torrents_to_prune)} torrents to prune using the smallest first strategy."
+    )
     for t in torrents_to_prune:
         print(f" - {t.name} ({t.size / gB:.5f} GB)")
 
@@ -149,6 +149,79 @@ def test_full_filter_and_prune_scenario(live_qbit_client: QBitClient):
             f"INFO: Cumulative size of pruned torrents is {size_of_pruned / gB:.2f} GB."
         )
         # The collected size should be greater than or equal to the target.
+        assert size_of_pruned >= space_to_free_bytes
+
+
+def test_full_filter_and_prune_scenario_score_based(live_qbit_client: QBitClient):
+    """
+    An integration test that simulates a full workflow using the 'score-based' strategy:
+    1. Fetches all torrents.
+    2. Filters them based on multiple criteria using TorrentFilterBuilder.
+    3. Prunes the list using a score of (seeding_time / size).
+    """
+    # --- 1. Setup: Define criteria ---
+    gB = 1024 * 1024 * 1024
+    three_days_in_seconds = 3 * 24 * 60 * 60
+    space_to_free_bytes = 5 * gB
+
+    states_to_check = {"stalledUP", "pausedUP", "checkingUP", "forcedUP"}
+
+    # --- 2. Execution: Fetch all torrents ---
+    all_torrents = live_qbit_client._client.torrents_info()
+    print(f"\nINFO: Found {len(all_torrents)} total torrents on the server.")
+    if not all_torrents:
+        pytest.skip("No torrents found on the server to test filtering.")
+
+    # --- 3. Execution: Filter using the builder ---
+    builder = (
+        TorrentFilterBuilder(all_torrents)
+        .with_states(states_to_check)
+        .seeding_time_greater_than(three_days_in_seconds)
+        .with_tracker_containing(TRACKER_URL)
+    )
+    filtered_torrents = builder.build()
+    print(f"INFO: Found {len(filtered_torrents)} torrents after filtering.")
+
+    if not filtered_torrents:
+        print(
+            "WARNING: No torrents matched the filter criteria. The pruning step will be skipped."
+        )
+        assert len(filtered_torrents) == 0
+        return
+
+    # --- 4. Execution: Prune the list ---
+    from qbit_checker import strategy_score_by_seeding_time
+
+    torrents_to_prune = QBitClient.select_torrents_for_cleanup(
+        torrents=filtered_torrents,
+        space_to_free_bytes=space_to_free_bytes,
+        strategy=strategy_score_by_seeding_time,
+    )
+    print(
+        f"INFO: Selected {len(torrents_to_prune)} torrents to prune using the seeding time/size score."
+    )
+    for t in torrents_to_prune:
+        score = (t.seeding_time / t.size) if t.size > 0 else 0
+        print(f" - {t.name} ({t.size / gB:.5f} GB, Score: {score:.2f})")
+
+    # --- 5. Assertion ---
+    total_size_of_filtered = sum(t.size for t in filtered_torrents)
+    if total_size_of_filtered < space_to_free_bytes:
+        print(
+            f"INFO: Total size of filtered torrents ({total_size_of_filtered / gB:.2f} GB) "
+            f"is less than the target ({space_to_free_bytes / gB:.2f} GB). "
+            "Expecting an empty prune list."
+        )
+        assert len(torrents_to_prune) == 0
+    else:
+        assert (
+            len(torrents_to_prune) > 0
+        ), "Expected to select torrents for pruning, but the list is empty."
+
+        size_of_pruned = sum(t.size for t in torrents_to_prune)
+        print(
+            f"INFO: Cumulative size of pruned torrents is {size_of_pruned / gB:.2f} GB."
+        )
         assert size_of_pruned >= space_to_free_bytes
 
 

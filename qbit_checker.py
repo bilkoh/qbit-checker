@@ -70,21 +70,24 @@ class QBitClient:
         return candidates
 
     @staticmethod
-    def select_torrents_for_cleanup(torrents: list, space_to_free_bytes: int) -> list:
+    def select_torrents_for_cleanup(
+        torrents: list, space_to_free_bytes: int, strategy: callable
+    ) -> list:
         """
-        Selects the smallest torrents from a list to free up a target amount of space.
+        Selects torrents from a list to free up space using a given strategy.
 
-        :param torrents: A list of torrent objects (must have a 'size' attribute).
+        :param torrents: A list of torrent objects.
         :param space_to_free_bytes: The target amount of space to free in bytes.
-        :return: A list of the smallest torrents that meet the space requirement, or an empty list if not possible.
+        :param strategy: A function that takes a list of torrents and returns a sorted list.
+        :return: A list of torrents that meet the space requirement, or an empty list.
         """
         # First, check if it's even possible to free the required space.
         total_available_space = sum(t.size for t in torrents)
         if total_available_space < space_to_free_bytes:
             return []
 
-        # Sort torrents by size, smallest first
-        sorted_torrents = sorted(torrents, key=lambda t: t.size)
+        # Apply the provided strategy to sort the torrents.
+        sorted_torrents = strategy(torrents)
 
         selected_for_deletion = []
         space_freed = 0
@@ -173,6 +176,25 @@ class TorrentFilterBuilder:
             for torrent in self._torrents
             if all(f(torrent) for f in self._filters)
         ]
+
+
+# --- Cleanup Strategies ---
+
+
+def strategy_smallest_first(torrents: list) -> list:
+    """Sorts torrents by size, smallest first."""
+    return sorted(torrents, key=lambda t: t.size)
+
+
+def strategy_score_by_seeding_time(torrents: list) -> list:
+    """Sorts torrents by a score of (seeding_time / size), highest score first."""
+    # The torrents with the highest score (most seeding time for their size)
+    # will be selected for deletion first.
+    return sorted(
+        torrents,
+        key=lambda t: (t.seeding_time / t.size) if t.size > 0 else 0,
+        reverse=True,
+    )
 
 
 class Config:
