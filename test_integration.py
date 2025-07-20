@@ -177,7 +177,7 @@ def test_full_filter_and_prune_scenario_score_based(live_qbit_client: QBitClient
         TorrentFilterBuilder(all_torrents)
         .with_states(states_to_check)
         .seeding_time_greater_than(three_days_in_seconds)
-        .with_tracker_containing(TRACKER_URL)
+        .without_tags([PERMASEED_TAG])
     )
     filtered_torrents = builder.build()
     print(f"INFO: Found {len(filtered_torrents)} torrents after filtering.")

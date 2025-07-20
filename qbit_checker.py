@@ -135,7 +135,18 @@ class TorrentFilterBuilder:
 
     def with_tags(self, tags: list[str]):
         tag_set = set(tags)
-        self._filters.append(lambda t: tag_set.intersection(t.tags.split(",")))
+        self._filters.append(
+            lambda t: tag_set.intersection({tag.strip() for tag in t.tags.split(",")})
+        )
+        return self
+
+    def without_tags(self, tags: list[str]):
+        tag_set = set(tags)
+        self._filters.append(
+            lambda t: not tag_set.intersection(
+                {tag.strip() for tag in t.tags.split(",")}
+            )
+        )
         return self
 
     def with_size_greater_than(self, size_bytes: int):
