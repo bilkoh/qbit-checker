@@ -100,19 +100,19 @@ class QBitClient:
 
         return selected_for_deletion
 
-    def remove_torrents(self, torrents: list, delete_files: bool = True):
+    def remove_torrents(self, torrents: list, remove_files: bool = True):
         """
         Removes a list of torrents from the qBittorrent client.
 
         :param torrents: A list of torrent objects to remove.
-        :param delete_files: If True, deletes the torrent's data from disk. Defaults to True.
+        :param remove_files: If True, deletes the torrent's data from disk.
         """
         if not torrents:
             return  # Do nothing if the list is empty
 
         torrent_hashes = [t.hash for t in torrents]
         self._client.torrents_delete(
-            torrent_hashes=torrent_hashes, delete_files=delete_files
+            torrent_hashes=torrent_hashes, delete_files=remove_files
         )
 
 

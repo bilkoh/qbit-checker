@@ -1,6 +1,7 @@
 import pytest
 from qbit_checker import QBitClient, Config, TorrentFilterBuilder
 
+DRY_RUN = True
 PERMASEED_TAG = "permaseed"
 TRACKER_URL = "upload.cx"
 
@@ -148,7 +149,6 @@ def test_full_filter_and_prune_scenario_smallest_first(live_qbit_client: QBitCli
         print(
             f"INFO: Cumulative size of pruned torrents is {size_of_pruned / gB:.2f} GB."
         )
-        # The collected size should be greater than or equal to the target.
         assert size_of_pruned >= space_to_free_bytes
 
 
@@ -223,6 +223,82 @@ def test_full_filter_and_prune_scenario_score_based(live_qbit_client: QBitClient
             f"INFO: Cumulative size of pruned torrents is {size_of_pruned / gB:.2f} GB."
         )
         assert size_of_pruned >= space_to_free_bytes
+
+
+def test_full_filter_prune_and_remove_scenario(live_qbit_client: QBitClient):
+    """
+    An integration test that simulates a full filter, prune, and REMOVE workflow.
+    Controlled by the DRY_RUN flag at the top of the file.
+    """
+    # --- 1. Setup: Define criteria ---
+    gB = 1024 * 1024 * 1024
+    # Use a smaller size for this test to make it easier to trigger.
+    space_to_free_bytes = 0.5 * gB
+    three_days_in_seconds = 3 * 24 * 60 * 60
+    states_to_check = {"stalledUP", "pausedUP", "checkingUP", "forcedUP"}
+
+    # --- 2. Execution: Fetch all torrents ---
+    all_torrents = live_qbit_client._client.torrents_info()
+    print(f"\nINFO: Found {len(all_torrents)} total torrents on the server.")
+    if not all_torrents:
+        pytest.skip("No torrents found on the server to test.")
+
+    # --- 3. Execution: Filter using the builder ---
+    builder = (
+        TorrentFilterBuilder(all_torrents)
+        .with_states(states_to_check)
+        .seeding_time_greater_than(three_days_in_seconds)
+        .without_tags([PERMASEED_TAG])
+    )
+    filtered_torrents = builder.build()
+    print(f"INFO: Found {len(filtered_torrents)} torrents after filtering.")
+
+    if not filtered_torrents:
+        pytest.skip(
+            "No torrents matched the filter criteria. The prune/remove step will be skipped."
+        )
+
+    # --- 4. Execution: Prune the list ---
+    from qbit_checker import strategy_smallest_first
+
+    torrents_to_remove = QBitClient.select_torrents_for_cleanup(
+        torrents=filtered_torrents,
+        space_to_free_bytes=space_to_free_bytes,
+        strategy=strategy_smallest_first,
+    )
+    print(f"INFO: Selected {len(torrents_to_remove)} torrents to remove.")
+    for t in torrents_to_remove:
+        score = ((t.seeding_time / 86400) / (t.size / gB)) if t.size > 0 else 0
+        print(f" - {t.name} ({t.size / gB:.2f} GB, Score: {score:.2f} days/GB)")
+
+    if not torrents_to_remove:
+        # This can happen if the filtered torrents don't meet the space requirement.
+        # It's a valid outcome, so we skip the rest of the test.
+        pytest.skip("No torrents were selected for removal. Skipping remove step.")
+
+    # --- 5. Execution: Remove the torrents (or skip if DRY_RUN) ---
+    if DRY_RUN:
+        print("\nINFO: DRY_RUN is True. Skipping actual torrent removal.")
+        pytest.skip("Skipping removal step because DRY_RUN is True.")
+
+    # If we reach here, DRY_RUN is False. Proceed with live deletion.
+    print(
+        f"WARNING: DRY_RUN is False. Attempting to remove {len(torrents_to_remove)} torrents."
+    )
+    # --- 6. Execution (Live Run) ---
+    hashes_to_remove = {t.hash for t in torrents_to_remove}
+    live_qbit_client.remove_torrents(torrents_to_remove, True)
+    print("SUCCESS: remove_torrents was called in live mode.")
+
+    # --- 7. Assertion (Live Run) ---
+    # Verify that the torrents are actually gone.
+    print("Verifying that torrents were removed from the server...")
+    remaining_torrents = live_qbit_client._client.torrents_info()
+    remaining_hashes = {t.hash for t in remaining_torrents}
+
+    removed_successfully = hashes_to_remove.isdisjoint(remaining_hashes)
+    assert removed_successfully, "Verification failed: Some torrents were not removed."
+    print("SUCCESS: Verification complete. Torrents were removed.")
 
 
 def test_torrents_have_specific_tracker(live_qbit_client: QBitClient):
