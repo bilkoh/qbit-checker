@@ -1,3 +1,4 @@
+import os
 import pytest
 from qbit_checker import QBitClient, Config, TorrentFilterBuilder
 
@@ -13,7 +14,8 @@ def live_qbit_client():
     Fails if the config file is missing or connection fails.
     """
     # Assumes integ-test-config.json is in the project root
-    config = Config("integ-test-config.json")
+    config_path = os.path.join(os.path.dirname(__file__), "integ-test-config.json")
+    config = Config(config_path)
 
     # Check that config loaded properly for a sane test environment
     assert config.get("qbittorrent.host"), "Host not found in integ-test-config.json"

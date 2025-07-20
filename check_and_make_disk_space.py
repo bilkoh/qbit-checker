@@ -13,7 +13,7 @@ from qbit_checker import (
 # --- Constants ---
 GIB_TO_BYTES = 1024 * 1024 * 1024
 # Time to wait in seconds for qBittorrent and the OS to process file deletions.
-POST_DELETE_SLEEP_SECONDS = 15
+POST_DELETE_SLEEP_SECONDS = 10
 # Assumes the config file is in the same directory as the script.
 DEFAULT_CONFIG_FILE = "config.json"
 
@@ -62,6 +62,14 @@ def main():
 
     # 2. Cleanup Process: If not enough space, try to free some up.
     print("\n--- Attempting to Free Space by Removing Torrents ---")
+
+    # Calculate how much space we actually need to free
+    _, _, current_free_bytes = shutil.disk_usage(args.path)
+    space_deficit_bytes = required_space_bytes - current_free_bytes
+    print(
+        f"INFO: Need to free {space_deficit_bytes / GIB_TO_BYTES:.2f} GiB to meet requirement"
+    )
+
     try:
         config = Config(args.config)
         client = QBitClient(config)
@@ -98,10 +106,10 @@ def main():
         print("INFO: No torrents matched the filter criteria for removal.")
         sys.exit(1)
 
-    # Select which torrents to remove based on the required space
+    # Select which torrents to remove based on the space deficit (not the total required space)
     torrents_to_remove = QBitClient.select_torrents_for_cleanup(
         torrents=filtered_torrents,
-        space_to_free_bytes=required_space_bytes,
+        space_to_free_bytes=space_deficit_bytes,
         strategy=strategy_smallest_first,
     )
 
