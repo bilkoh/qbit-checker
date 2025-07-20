@@ -42,7 +42,7 @@ def main():
         help="The filesystem path to check for free space (e.g., '/downloads').",
     )
     parser.add_argument(
-        "gib", type=float, help="The required amount of free space in GiB."
+        "bytes", type=int, help="The required amount of free space in bytes."
     )
     parser.add_argument(
         "--config",
@@ -52,7 +52,7 @@ def main():
     )
     args = parser.parse_args()
 
-    required_space_bytes = int(args.gib * GIB_TO_BYTES)
+    required_space_bytes = args.bytes
 
     # 1. Initial Check: See if we already have enough space.
     print("--- Initial Disk Space Check ---")
