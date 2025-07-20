@@ -187,12 +187,16 @@ def strategy_smallest_first(torrents: list) -> list:
 
 
 def strategy_score_by_seeding_time(torrents: list) -> list:
-    """Sorts torrents by a score of (seeding_time / size), highest score first."""
-    # The torrents with the highest score (most seeding time for their size)
-    # will be selected for deletion first.
+    """
+    Sorts torrents by a score of (seeding_days / size_gb), highest score first.
+    This prioritizes torrents that have seeded the longest for their size.
+    """
+    # The torrents with the highest score will be selected for deletion first.
     return sorted(
         torrents,
-        key=lambda t: (t.seeding_time / t.size) if t.size > 0 else 0,
+        key=lambda t: (
+            ((t.seeding_time / 86400) / (t.size / (1024**3))) if t.size > 0 else 0
+        ),
         reverse=True,
     )
 

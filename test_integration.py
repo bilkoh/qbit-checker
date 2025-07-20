@@ -201,8 +201,8 @@ def test_full_filter_and_prune_scenario_score_based(live_qbit_client: QBitClient
         f"INFO: Selected {len(torrents_to_prune)} torrents to prune using the seeding time/size score."
     )
     for t in torrents_to_prune:
-        score = (t.seeding_time / t.size) if t.size > 0 else 0
-        print(f" - {t.name} ({t.size / gB:.5f} GB, Score: {score:.2f})")
+        score = ((t.seeding_time / 86400) / (t.size / gB)) if t.size > 0 else 0
+        print(f" - {t.name} ({t.size / gB:.2f} GB, Score: {score:.2f} days/GB)")
 
     # --- 5. Assertion ---
     total_size_of_filtered = sum(t.size for t in filtered_torrents)
