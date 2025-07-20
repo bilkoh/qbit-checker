@@ -315,7 +315,7 @@ def test_remove_torrents_can_preserve_files(config_file: Path, mocker):
     qbit_client = QBitClient(config)
 
     # 2. Execution
-    qbit_client.remove_torrents(torrents_to_delete, delete_files=False)
+    qbit_client.remove_torrents(torrents_to_delete, False)
 
     # 3. Assertion
     mock_api_client.torrents_delete.assert_called_once_with(
